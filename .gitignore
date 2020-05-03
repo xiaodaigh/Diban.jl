@@ -22,3 +22,22 @@ docs/site/
 # committed for packages, but should be committed for applications that require a static
 # environment.
 Manifest.toml
+
+.DS_Store
+/dev/
+*.bin
+*.out
+*.log
+test-cpp-wrap/CMakeCache.txt
+*.so
+test-cpp-wrap/Makefile
+test-cppwrap-complex/CMakeCache.txt
+test-cppwrap-complex/cmake_install.cmake
+test-cppwrap-complex/Makefile
+test-cppwrap-complex/test
+test-include-julia/cmake_install.cmake
+test-include-julia/CMakeCache.txt
+test.parquet
+test-include-julia/Makefile
+main
+test-cpp-wrap/cmake_install.cmake
