@@ -5,7 +5,22 @@ v = reduce(vcat, [readdir(p, join=true) for p in readdir("c:/data/parquet-test\\
 
 files = [v for v in v if splitext(v)[2] == ".parquet" && isfile(v)]
 
+files = readdir("C:/git/parquet-data-collection", join=true)
+ff = [f for f in files if isfile(f) && splitext(f)[2]==".parquet"]
+@time a = read_parquet.(ff);
 
+for ff in ff
+    try
+        read_parquet(ff)
+    catch
+        println(ff)
+    end
+end
+
+
+read_parquet("C:/git/parquet-data-collection/noshowappointments.parquet")
+
+read_column("C:/git/parquet-data-collection/noshowappointments.parquet", 1)
 
 using ParquetWriter
 
@@ -15,9 +30,9 @@ mf = metadata(files[2])
 
 @time a = read_parquet(files[2])
 
-using DataFrames
+using DataFrames|
 @time a = read_parquet("c:/scratch/test.parquet");
-@time DataFrame(a, copycols=false);
+@time ad = DataFrame(a, copycols=false);
 
 read_column(files[1], 9)
 

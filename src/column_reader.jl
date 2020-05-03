@@ -50,11 +50,11 @@ function read_column(path, col_num)
                 end
             elseif page_encoding == Parquet.Encoding.PLAIN
                 if repetition_not_used
-                    res[write_cursor:write_cursor+l-1] .= values
+                    res[write_cursor:write_cursor+l-1] .= T.(values)
                 else
                     for (offset, (repetition, value))  in enumerate(zip(repetition, values))
                         if repetition != 0
-                            res[write_cursor+offset-1] = value
+                            res[write_cursor+offset-1] = T(value)
                         end
                     end
                 end
