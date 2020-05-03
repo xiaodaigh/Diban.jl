@@ -41,3 +41,7 @@ test.parquet
 test-include-julia/Makefile
 main
 test-cpp-wrap/cmake_install.cmake
+test-cpp-wrap/cmake_modules/FindArrow.cmake
+test-cpp-wrap/cmake_modules/FindParquet.cmake
+test-include-julia/cmake_modules/FindArrow.cmake
+test-include-julia/cmake_modules/FindParquet.cmake
