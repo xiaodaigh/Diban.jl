@@ -1,6 +1,4 @@
-# ParquetWriter.jl
-
-I know it says writer in the title but it's just a temporary title.
+# Diban.jl
 
 There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at the moment
 
