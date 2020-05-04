@@ -13,8 +13,9 @@ You need a particular branch of Parquet.jl
 
 ]add https://github.com/xiaodaigh/Parquet.jl#zj/parquet-writer
 
-read_parquet(path)
+# there are some bugs with multithreading so recommend to use without it for now
+read_parquet(path, mutlithreaded=false)
 
 ### reading only these columns
-read_parquet(path, ["col1", "col2"])
+read_parquet(path, ["col1", "col2"], mutlithreaded=false)
 ```

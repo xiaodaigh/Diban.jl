@@ -7,7 +7,11 @@ files = [v for v in v if splitext(v)[2] == ".parquet" && isfile(v)]
 
 files = readdir("C:/git/parquet-data-collection", join=true)
 ff = [f for f in files if isfile(f) && splitext(f)[2]==".parquet"]
-@time a = read_parquet.(ff);
+
+using ParquetWriter
+@time a = read_parquet.(ff; multithreaded = false);
+
+a
 
 for ff in ff
     try
