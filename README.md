@@ -11,6 +11,7 @@ You need a particular branch of Parquet.jl
 
 ]add https://github.com/xiaodaigh/Parquet.jl#zj/parquet-writer
 
+using Diban
 # there are some bugs with multithreading so recommend to use without it for now
 read_parquet(path, mutlithreaded=false)
 
