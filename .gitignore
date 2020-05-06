@@ -45,3 +45,13 @@ test-cpp-wrap/cmake_modules/FindArrow.cmake
 test-cpp-wrap/cmake_modules/FindParquet.cmake
 test-include-julia/cmake_modules/FindArrow.cmake
 test-include-julia/cmake_modules/FindParquet.cmake
+*.cmake
+src/cpp/test-cpp-wrap/CMakeCache.txt
+src/cpp/test-cpp-wrap/Makefile
+src/cpp/test-cppwrap-complex/CMakeCache.txt
+src/cpp/test-cppwrap-complex/Makefile
+src/cpp/test-cppwrap-complex/test
+src/cpp/test-include-julia/CMakeCache.txt
+src/cpp/test-include-julia/Makefile
+test-cpp-wrap/CMakeLists.txt
+test-cpp-wrap/CMakeLists.txt
