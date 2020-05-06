@@ -4,17 +4,22 @@ There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at
 
 ## Installation & Usage
 
-You need a particular branch of Parquet.jl
+You need a particular branch of Parquet.jl and the master branch of Diban.jl
 
 ```julia
 # add a particular version of Parquet.jl with fixes
-
 ]add https://github.com/xiaodaigh/Parquet.jl#zj/parquet-writer
 
+# add a particular version of Parquet.jl with fixes
+]add https://github.com/xiaodaigh/Diban.jl
+```
+
+### Usage
+```julia
 using Diban
 # there are some bugs with multithreading so recommend to use without it for now
 read_parquet(path, mutlithreaded=false)
 
-### reading only these columns
+### reading only columns `col1` and `col2`
 read_parquet(path, ["col1", "col2"], mutlithreaded=false)
 ```
