@@ -1,6 +1,6 @@
 # Diban.jl (Dìbǎn 地板)
 
-There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at the moment
+There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at the moment but it works on newer Parquet files that Parquet.jl can't handle at the moment.
 
 ## Installation & Usage
 
