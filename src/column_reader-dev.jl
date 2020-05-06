@@ -1,101 +1,135 @@
-using ParquetWriter:TYPES
+# R Code to generate data
+# ```r
+# arrow::write_parquet(
+#   data.frame(
+#     a = c(1, 3, NA, 4, NA, 1, 1, NA, 1:8),
+#     b = c(1:9, 1:7)),
+#   "c:/scratch/nihao.parquet")
+#   ```
+
+using Diban
+using Diban: TYPES, read_column
 using Parquet
 using Parquet: SZ_PAR_MAGIC, SZ_FOOTER, PAR2, read_thrift
-path = files[1]
-col_num=2
 
-using ParquetWriter
-ParquetWriter.read_column(path, 2)
+path = "c:/scratch/test.parquet"
+
+#@time read_parquet(path)
+
+path = "c:/scratch/nihao.parquet"
 
 
-par = ParFile(path)
-io = open(path)
-sz = filesize(io)
-seek(io, sz - 8)
-len = read(io, Int32)
-seek(io, sz - SZ_PAR_MAGIC - SZ_FOOTER - len)
-filemetadata = read_thrift(io, PAR2.FileMetaData)
-close(io)
 
-T = TYPES[filemetadata.schema[col_num+1]._type+1]
-# TODO detect if missing is necessary
-res = Vector{Union{Missing, T}}(missing, nrows(par))
-write_cursor = 1
-#for row_group in filemetadata.row_groups
-row_group =  filemetadata.row_groups[1]
-pgs = Parquet.pages(par, row_group.columns[col_num])
-# the first page is always the dictionary page
-dictionary_page = pgs[1]
+Diban.metadata(path)
 
-# TODO different logic for different stuff
-dictionary_of_values = T.(values(par, dictionary_page)[1])
 
-data_page = pgs[2]
 
-vals, repetition, decode = Parquet.values(par, data_page)
 
-@which Parquet.values(par, data_page)
 
-cname = "Cl.thickness"
-@which Parquet.max_definition_level(par.schema, cname)
-@which Parquet.max_definition_level(par.schema, cname)
 
-parentname("Cl.thickness")
 
-@which Parquet.isrequired(par.schema, "Cl.thickness")
 
-schname = "Cl.thickness"
-schelem = Parquet.elem(par.schema, schname)
 
-using Thrift
-Thrift.isfilled(schelem, :repetition_type)
 
-@which Parquet.parentname(schname)
 
-join(parentname(), '.')
 
-Parquet.parentname(split(schname, '.'))
+fileio=open(path)
+seek(fileio, 232)
 
-(schelem.repetition_type == PAR2.FieldRepetitionType.REQUIRED)
 
-# everything after the first data datapages
-for data_page in Base.Iterators.drop(pages, 1)
-	values, repetition, decode = Parquet.values(par, data_page)
-	l = sum(repetition)
+ph = Parquet.read_thrift(fileio, PAR2.PageHeader)
 
-	# if all repetition values are 1 then it's not used
-	repetition_not_used = all(==(1), repetition)
 
-	# data_page can be either
-	# * dictionary-encoded in which we should look into the dictionary
-	# * plained-encoded in which case just return the values
-	page_encoding = ParquetWriter.page_encoding(data_page)
 
-	if page_encoding == Parquet.Encoding.PLAIN_DICTIONARY
-		if repetition_not_used
-			res[write_cursor:write_cursor+l-1] .= dictionary_of_values[values.+1]
-		else
-			for (offset, (repetition, value))  in enumerate(zip(repetition, values))
-				if repetition != 0
-					res[write_cursor+offset-1] = dictionary_of_values[value.+1]
-				end
-			end
-		end
-	elseif page_encoding == Parquet.Encoding.PLAIN
-		if repetition_not_used
-			res[write_cursor:write_cursor+l-1] .= values
-		else
-			for (offset, (repetition, value))  in enumerate(zip(repetition, values))
-				if repetition != 0
-					res[write_cursor+offset-1] = value
-				end
-			end
-		end
-	else
-		error("page encoding not supported yet")
-	end
 
-	write_cursor += l
+
+
+
+
+position(fileio)
+
+compressed_data = read(fileio, ph.compressed_page_size)
+
+using Snappy
+
+uncompressed_data = Snappy.uncompress(compressed_data)
+
+reinterpret(Int32, uncompressed_data)
+
+ph2 = Parquet.read_thrift(fileio, PAR2.PageHeader)
+
+
+
+
+
+
+
+
+
+
+compressed_data = read(fileio, ph2.compressed_page_size)
+uncompressed_data = Snappy.uncompress(compressed_data)
+uncompressed_data
+
+
+
+
+
+
+
+
+io = IOBuffer(uncompressed_data)
+
+# the definition data is encoded in the `encoded_data_length` bytes
+encoded_data_length = Int(read(io, UInt32))
+
+# the next set of data is a LEB128 unsigned int coded by that
+# althought it is possible for the number be larger 2^31-1, in practice it is
+# not encouraged, and hence not supported by this algorithm
+using Parquet: _read_varint;
+header = Parquet._read_varint(io, UInt32)
+# if the last binary digit is 1 then the next bits are binary encoded
+# otherwise it's rle encoded
+
+bit_pack_encoded = (header & UInt(1)) == 1
+
+if bit_pack_encoded
+	bit_packed_run_length = header >> 1
+	bit_packed_data = read(io, bit_packed_run_length)
+	reduce(vcat, digits.(bit_packed_data, base = 2, pad=8))
+else
+	rle_run_length = header >> 1
+	repeated_value = read(io, UInt8)
 end
-#end
-return res
+
+Int(rle_run_length), Int(repeated_value)
+
+position(io)
+
+encoded_data = read(io)
+
+dataio = IOBuffer(encoded_data)
+
+bitwidth = read(dataio, UInt8)
+
+header = Parquet._read_varint(dataio, UInt32)
+
+string(0x10, base=2, pad=8)
+string(0x32, base=2, pad=8)
+
+pos = 0
+
+bytes_to_skip, bits_to_shift = divrem(pos, 8)
+
+
+
+
+bp = BitPackedIterator(read(dataio, 2), 3)
+
+iterate(bp)
+
+for value in bp
+	println(value)
+end
+
+# TODO what happens if the bitwidth is larger than 8?

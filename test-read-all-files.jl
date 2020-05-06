@@ -1,15 +1,68 @@
-
+using ParquetWriter
 
 v = reduce(vcat, [readdir(p, join=true) for p in readdir("c:/data/parquet-test\\", join=true)])
 
+@time adf = read_parquet("c:/scratch\\test.parquet");
 
 files = [v for v in v if splitext(v)[2] == ".parquet" && isfile(v)]
+@time Threads.@threads for f in files
+    @time read_parquet(f, multithreaded = false);
+end
 
 files = readdir("C:/git/parquet-data-collection", join=true)
+
 ff = [f for f in files if isfile(f) && splitext(f)[2]==".parquet"]
 
-using ParquetWriter
+@time read_parquet.(ff)
+
+@time read_parquet(ff[3]);
+
+@time a= read_parquet(ff[3], multithreaded = false);
+
+using BenchmarkTools
+@benchmark read_parquet(ff[3])
+
+ncols(ParFile(ff[3]))
+filemetadata = metadata(ff[3])
+
+ep = [@elapsed read_column(ff[3], filemetadata, i) for i in 1:169]
+
+using StatsBase, Statistics
+mean(ep)
+std(ep)
+
+
+ff[3]
+
+using ParquetFiles
+
+using ParquetFiles
+
+@time read_parquet(ff[2], multithreaded =false);
+
+for i in 1:ncols(ParFile(ff[2]))
+    println(i)
+    read_column(ff[2], i)
+end
+
+read_column(ff[2], 33)
+
+a = metadata("c:/scratch/test.parquet")
+
+a
+
+using Parquet:ParFile
+using Parquet
+par = ParFile("c:/scratch\\test.parquet")
+filemetadata = metadata("c:/scratch\\test.parquet")
+filemetadata.row_groups[1].columns[5]
+row_group = filemetadata.row_groups[1]
+pages = Parquet.pages(par, row_group.columns[5])
+
+
 @time a = read_parquet.(ff; multithreaded = false);
+
+@time a = read_parquet.(ff; multithreaded = true);
 
 a
 

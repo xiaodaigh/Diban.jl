@@ -3,15 +3,10 @@ using Parquet
 
 const TYPES = (Bool, Int32, Int64, Int128, Float32, Float64, String, UInt8)
 
-function read_column(path, col_num)
+read_column(path, col_num) = read_column(path, metadata(path), col_num)
+
+function read_column(path, filemetadata, col_num)
     par = ParFile(path)
-    io = open(path)
-    sz = filesize(io)
-    seek(io, sz - 8)
-    len = read(io, Int32)
-    seek(io, sz - SZ_PAR_MAGIC - SZ_FOOTER - len)
-    filemetadata = read_thrift(io, PAR2.FileMetaData)
-    close(io)
 
     T = TYPES[filemetadata.schema[col_num+1]._type+1]
     # TODO detect if missing is necessary
@@ -19,14 +14,21 @@ function read_column(path, col_num)
     write_cursor = 1
     for row_group in filemetadata.row_groups
         pages = Parquet.pages(par, row_group.columns[col_num])
-        # the first page is always the dictionary page
-        dictionary_page = pages[1]
 
-        # TODO different logic for different stuff
-        dictionary_of_values = T.(values(par, dictionary_page)[1])
+        drop_page_count = 0
+        # is the first page a dictionary page
+        # this is not the case for boolean values for example
+        if isfilled(pages[1].hdr, :dictionary_page_header)
+            # the first page is almost always the dictionary page
+            dictionary_page = pages[1]
+            drop_page_count = 1
+            dictionary_of_values = T.(values(par, dictionary_page)[1])
+        end
+
+        # TODO deal with other types of pages e.g. dataheaderv2
 
         # everything after the first data datapages
-        for data_page in Base.Iterators.drop(pages, 1)
+        for data_page in Base.Iterators.drop(pages, drop_page_count)
             values, repetition, decode = Parquet.values(par, data_page)
             l = sum(repetition)
 
@@ -36,7 +38,7 @@ function read_column(path, col_num)
             # data_page can be either
             # * dictionary-encoded in which we should look into the dictionary
             # * plained-encoded in which case just return the values
-            page_encoding = ParquetWriter.page_encoding(data_page)
+            page_encoding = Diban.page_encoding(data_page)
 
             if page_encoding == Parquet.Encoding.PLAIN_DICTIONARY
                 if repetition_not_used

@@ -1,12 +1,15 @@
-name = "ParquetWriter"
+name = "Diban"
 uuid = "a46aeeba-2081-4047-a12e-9fb5f650f4fd"
 authors = ["xiaodaigh <zhuojia.dai@gmail.com>"]
 version = "0.1.0"
 
 [deps]
+LittleEndianBase128 = "1724a1d5-ab78-548d-94b3-135c294f96cf"
 NamedTupleTools = "d9ec5142-1e00-5aa0-9d6a-321866360f50"
 Parquet = "626c502c-15b0-58ad-a749-f091afb673ae"
+ParquetFiles = "46a55296-af5a-53b0-aaa0-97023b66127f"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+Snappy = "59d4ed8c-697a-5b28-a4c7-fe95c22820f9"
 Thrift = "8d9c9c80-f77e-5080-9541-c6f69d204e22"
 
 [compat]
