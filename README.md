@@ -1,4 +1,4 @@
-# Diban.jl
+# Diban.jl (Dìbǎn 地板)
 
 There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at the moment
 
