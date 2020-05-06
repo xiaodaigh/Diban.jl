@@ -12,7 +12,7 @@ You need a particular branch of Parquet.jl and the master branch of Diban.jl
 # add a particular version of Parquet.jl with fixes
 ]add https://github.com/xiaodaigh/Parquet.jl#zj/fix-reader
 
-# add a particular version of Parquet.jl with fixes
+# add the latest version of Dìbǎn
 ]add https://github.com/xiaodaigh/Diban.jl
 ```
 
