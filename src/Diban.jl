@@ -10,6 +10,10 @@ include("read_parquet.jl")
 
 include("BitPackedIterator.jl")
 
+include("writer_consts.jl")
+include("writer.jl")
+
+
 # from column_reader.jl
 export read_column
 
@@ -26,5 +30,9 @@ export read_parquet
 # from BitPackedIterator
 export BitPackedIterator
 export iterate, length
+
+# from writer.jl
+# export write_col
+
 
 end # module

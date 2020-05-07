@@ -18,9 +18,10 @@ path = "c:/scratch/test.parquet"
 
 path = "c:/scratch/nihao.parquet"
 
+path = "tmp.parquet"
 
 
-Diban.metadata(path)
+metadata = Diban.metadata(path)
 
 
 
@@ -34,7 +35,10 @@ Diban.metadata(path)
 
 
 fileio=open(path)
-seek(fileio, 232)
+
+metadata.row_groups[1].columns[1].meta_data.dictionary_page_offset
+
+seek(fileio, metadata.row_groups[1].columns[1].meta_data.dictionary_page_offset)
 
 
 ph = Parquet.read_thrift(fileio, PAR2.PageHeader)
@@ -54,7 +58,7 @@ using Snappy
 
 uncompressed_data = Snappy.uncompress(compressed_data)
 
-reinterpret(Int32, uncompressed_data)
+reinterpret(Int64, uncompressed_data)
 
 ph2 = Parquet.read_thrift(fileio, PAR2.PageHeader)
 

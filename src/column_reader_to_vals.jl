@@ -1,5 +1,6 @@
 using Parquet, Diban
 
+path = "tmp.parquet"
 #v1 = read_column(path, 1)
 col_num=1
 
@@ -24,7 +25,7 @@ data_page = pgs[2]
 @which Parquet.values(par, data_page)
 
 
-# @time vals, repetition, decode = Parquet.values(par, data_page)
+#@time vals, repetition, decode = Parquet.values(par, data_page)
 
 
 
@@ -46,25 +47,21 @@ using Parquet: PageType
 
 @which read_levels_and_values(io, encs, ctype, num_values, par, page)
 # below line is my code
-#vals, repetition, decode = read_levels_and_values(io, encs, ctype, num_values, par, page)
+vals, repetition, dd = read_levels_and_values(io, encs, ctype, num_values, par, page)
 
 
 	################################################################################
 	# begin: expansion of functions `read_levels_and_values`
 	################################################################################
-
-cname = colname(page.colchunk)
+cname = Parquet.colname(page.colchunk)
 enc, defn_enc, rep_enc = encs
 
 position(io)
 #defn_levels = read(io, 8)
 
-Int.(defn_levels)
-
 #@debug("before reading repn levels bytesavailable in page: $(bytesavailable(io))")
 # read repetition levels. skipped if all columns are at 1st level
 # TODO ZJ why is it checking for a "." in the name
-@warn "ZJ why is it checking for a "." in the name"
 repn_levels = ('.' in cname) ? read_levels(io, max_repetition_level(par.schema, cname), rep_enc, num_values) : Int[]
 
 
@@ -72,12 +69,13 @@ repn_levels = ('.' in cname) ? read_levels(io, max_repetition_level(par.schema, 
 # read definition levels. skipped if column is required
 defn_levels = isrequired(par.schema, cname) ? Int[] : read_levels(io, max_definition_level(par.schema, cname), defn_enc, num_values)
 
-@which read_levels(io, max_definition_level(par.schema, cname), defn_enc, num_values)
 
 num_values
 bw = 1
 using Parquet: read_hybrid
 @which read_hybrid(io, num_values, bw)
+
+read_hybrid(io, num_values, bw)
 
 runhdr = 2
 @which read_bitpacked_run(io, runhdr, bits, byt, typ, subarr)
