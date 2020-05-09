@@ -1,8 +1,14 @@
 # Diban.jl (Dìbǎn 地板)
 
-There is a `read_parquet` function to read parquet files! It's EXTREMELY slow at the moment but it works on newer Parquet files that Parquet.jl can't handle at the moment.
+There is a `write_paruqet` and `read_parquet` functions to write and read
+parquet files! It's EXTREMELY slow at the moment but it works on newer Parquet
+files that Parquet.jl can't handle at the moment.
 
-## Installation & Usage
+The intention is to contribute these functions back to Parquet.jl so as not to
+fragment the community efforts. But the process is likely to be slow. Therefore,
+I make Dìbǎn available while Parquet.jl is being worked on.
+
+## Installation
 
 You need a particular branch of Parquet.jl and the master branch of Diban.jl
 
@@ -11,9 +17,9 @@ You need a particular branch of Parquet.jl and the master branch of Diban.jl
 ]add https://github.com/xiaodaigh/Diban.jl
 ```
 
-### Usage
+## Usage
 
-#### Write
+### Write
 Diban supports `Int32, Int64, Float32, Float64, Bool, String` vectors, `missing`
 values are supported.
 
@@ -42,7 +48,7 @@ a = read_parquet(path)
 ```
 
 
-#### Read
+### Read
 ```julia
 using Diban
 
@@ -53,7 +59,9 @@ read_parquet(path)
 read_parquet(path, ["col1", "col2"])
 ```
 
-#### Bugs?
+### Notes & Bugs?
+
+Currently, only UNnested columns are supported.
 
 There are some bugs with multi-threading so you may want to use `mutlithreaded=false`
 
