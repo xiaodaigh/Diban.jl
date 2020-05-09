@@ -4,7 +4,7 @@
 # DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
 
 
-module ParquetThrift
+module PAR2
 
 using Thrift
 import Thrift.process, Thrift.meta, Thrift.distribute
@@ -72,9 +72,9 @@ export EncryptionAlgorithm # struct
 export FileMetaData # struct
 export FileCryptoMetaData # struct
 
-include("parquet_constants.jl")
-include("parquet_types.jl")
-include("parquet_impl.jl")  # server methods to be hand coded
+include("PAR2_constants.jl")
+include("PAR2_types.jl")
+include("PAR2_impl.jl")  # server methods to be hand coded
 
 
-end # module parquet
+end # module PAR2

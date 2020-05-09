@@ -1,39 +1,32 @@
 using Tables
-using Parquet: PAR2;
-using Thrift, DataFrames
-using Snappy, CodecZstd
+using DataAPI
+using Thrift
+using Snappy
+using CodecZstd: ZstdCompressor
+using CodecZlib: GzipCompressor
+#using CodecLz4: LZ4HCCompressor
 using LittleEndianBase128
 using LittleEndianBase128: encode
-
-function write_parquet(path::String, tbl)
-    # tbl needs to be iterable by column as parquet is a columnar format
-    @assert Tables.columnaccess(tbl)
-
-    fileio = open(path, "w")
-
-    # write the magic number
-    write(fileio, "PAR1")
-
-    # start writing the column
-    for colname in Tables.columnnames(tbl)
-        colvals = Tables.getcolumn(df, :x1)
-
-        # first compute dictionary
-
-        # compute the number missing values
-
-
-    end
-end
 
 function write_thrift(fileio, thrift_obj)
     p = TCompactProtocol(TFileTransport(fileio))
     Thrift.write(p, thrift_obj)
 end
 
-function compress_using_codec(colvals, codec = COMPRESSION_CODEC_CODE["snappy"])
-    if codec == COMPRESSION_CODEC_CODE["snappy"]
-        compressed_data = Snappy.compress(reinterpret(UInt8, colvals) |> collect)
+function compress_using_codec(colvals::AbstractArray, codec::Int)::Vector{UInt8}
+    uncompressed_byte_data = reinterpret(UInt8, colvals) |> collect
+
+    if codec == COMPRESSION_CODEC_CODE["UNCOMPRESSED"]
+        return uncompressed_byte_data
+    elseif codec == COMPRESSION_CODEC_CODE["SNAPPY"]
+        compressed_data = Snappy.compress(uncompressed_byte_data)
+    elseif codec == COMPRESSION_CODEC_CODE["GZIP"]
+        compressed_data = transcode(GzipCompressor, uncompressed_byte_data)
+    elseif codec == COMPRESSION_CODEC_CODE["LZ4"]
+        error("lz4 is not supported as data compressed with https://github.com/JuliaIO/CodecLz4.jl can't seem to be read by R or Python. If you know how to fix it please help out.")
+        #compressed_data = transcode(LZ4HCCompressor, uncompressed_byte_data)
+    elseif codec == COMPRESSION_CODEC_CODE["ZSTD"]
+        compressed_data = transcode(ZstdCompressor, uncompressed_byte_data)
     else
         error("not yet implemented")
     end
@@ -41,30 +34,53 @@ function compress_using_codec(colvals, codec = COMPRESSION_CODEC_CODE["snappy"])
     return compressed_data
 end
 
-function write_col_dict(fileio, colvals, codec)
+function compress_using_codec(colvals::AbstractVector{String}, codec::Int)::Vector{UInt8}
+    # the output
+    io = IOBuffer()
+
+    # write the values
+    for val in colvals
+        # for string it needs to be stored as BYTE_ARRAY which needs the length
+        # to be the first 4 bytes UInt32
+        write(io, val |> sizeof |> UInt32)
+        # write each of the strings one after another
+        write(io, val)
+    end
+
+    uncompressed_bytes = take!(io)
+    return compress_using_codec(uncompressed_bytes, codec)
+end
+
+function write_col_dict(fileio, colvals::AbstractArray{T}, codec) where T
     """ write the column dictionary chunk """
-    uvals = unique(colvals)
+    uvals = DataAPI.levels(colvals) # this does not include missing
+    if nonmissingtype(T) == String
+        # the raw bytes of made of on UInt32 to indicate string length
+        # and the content of the string
+        # so the formula for dict size is as below
+        uncompressed_dict_size = sizeof(UInt32)*length(uvals) + sum(sizeof, uvals)
+    else
+        uncompressed_dict_size = length(uvals)*sizeof(eltype(uvals))
+    end
 
-    compressed_uvals::Vector{UInt8} = compress_using_codec(uvals, COMPRESSION_CODEC_CODE["snappy"])
-
-    uncompressed_dict_size = length(uvals)*sizeof(eltype(uvals))
+    compressed_uvals::Vector{UInt8} = compress_using_codec(uvals, codec)
     compressed_dict_size = length(compressed_uvals)
 
     # TODO do the CRC properly
-    crc= 0
+    crc = 0
 
     # construct dictionary metadata
     dict_page_header = PAR2.PageHeader()
 
-    set_field!(dict_page_header, :_type, PAGE_TYPE["DICTIONARY_PAGE"])
-    set_field!(dict_page_header, :uncompressed_page_size , uncompressed_dict_size)
-    set_field!(dict_page_header, :compressed_page_size , compressed_dict_size)
-    set_field!(dict_page_header, :crc , 0)
+    Thrift.set_field!(dict_page_header, :_type, PAGE_TYPE["DICTIONARY_PAGE"])
+    Thrift.set_field!(dict_page_header, :uncompressed_page_size , uncompressed_dict_size)
+    Thrift.set_field!(dict_page_header, :compressed_page_size , compressed_dict_size)
+    Thrift.set_field!(dict_page_header, :crc , crc)
 
-    set_field!(dict_page_header, :dictionary_page_header, PAR2.DictionaryPageHeader())
-    set_field!(dict_page_header.dictionary_page_header, :num_values , Int32(length(uvals)))
-    set_field!(dict_page_header.dictionary_page_header, :encoding , Int32(2)) # value 2 is plain encoding for dictionary pages
-    set_field!(dict_page_header.dictionary_page_header, :is_sorted , false)
+    Thrift.set_field!(dict_page_header, :dictionary_page_header, PAR2.DictionaryPageHeader())
+    Thrift.set_field!(dict_page_header.dictionary_page_header, :num_values , Int32(length(uvals)))
+    Thrift.set_field!(dict_page_header.dictionary_page_header, :encoding , Int32(2)) # value 2 is plain encoding for dictionary pages
+    Thrift.set_field!(dict_page_header.dictionary_page_header, :is_sorted , false)
 
 
     before_write_page_header_pos = position(fileio)
@@ -80,8 +96,8 @@ function write_col_dict(fileio, colvals, codec)
 end
 
 # TODO set the encoding code into a dictionary
-function write_col_chunk(fileio, colvals, encoding = 0, codec = COMPRESSION_CODEC_CODE["snappy"])
-    if encoding == 0
+function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) where T
+    if encoding == PAR2.Encoding.PLAIN
         """Plain encoding"""
         # generate the data page header
         data_page_header = PAR2.PageHeader()
@@ -89,21 +105,67 @@ function write_col_chunk(fileio, colvals, encoding = 0, codec = COMPRESSION_CODE
         # write repetition level data
         # do nothing
 
-        # write definition_level
-        # using rle
-
-        rle_header = LittleEndianBase128.encode(UInt32(length(colvals)) << 1)
-
-        # TODO if there are missing then need to update
-        repeated_value = UInt8(1)
-
-        encoded_defn_data_length = UInt32(sizeof(rle_header) + sizeof(repeated_value))
-
         data_to_compress_io = IOBuffer()
-        write(data_to_compress_io, encoded_defn_data_length)
-        write(data_to_compress_io, rle_header)
-        write(data_to_compress_io, repeated_value)
-        write(data_to_compress_io, colvals)
+
+        if Missing <: T
+            # if there is missing
+            # use the bit packing algorithm to write the
+            # definition_levels
+            bytes_needed = ceil(Int, length(colvals)/sizeof(UInt8))
+            tmp = UInt32((UInt32(bytes_needed) << 1) | 1)
+            bitpacking_header = LittleEndianBase128.encode(tmp)
+
+
+            tmpio = IOBuffer()
+            not_missing_bits::BitArray = .!ismissing.(colvals)
+            write(tmpio, not_missing_bits)
+            seek(tmpio, 0)
+
+            encoded_defn_data = read(tmpio, bytes_needed)
+
+            encoded_defn_data_length = length(bitpacking_header) + bytes_needed
+            # write the definition data
+            write(data_to_compress_io, UInt32(encoded_defn_data_length))
+            write(data_to_compress_io, bitpacking_header)
+            write(data_to_compress_io, encoded_defn_data)
+        else
+            # if there is no missing can just use RLE of one
+            # using rle
+            rle_header = LittleEndianBase128.encode(UInt32(length(colvals)) << 1)
+            repeated_value = UInt8(1)
+            encoded_defn_data_length = UInt32(sizeof(rle_header) + sizeof(repeated_value))
+
+            # write the definition data
+            write(data_to_compress_io, UInt32(encoded_defn_data_length))
+            write(data_to_compress_io, rle_header)
+            write(data_to_compress_io, repeated_value)
+        end
+
+        if nonmissingtype(T) == String
+            # write the values
+            for val in skipmissing(colvals)
+                # for string it needs to be stored as BYTE_ARRAY which needs the length
+                # to be the first 4 bytes UInt32
+                write(data_to_compress_io, val |> sizeof |> UInt32)
+                # write each of the strings one after another
+                write(data_to_compress_io, val)
+            end
+        elseif nonmissingtype(T) == Bool
+            # write the bitacpked bits
+            # write a bitarray seems to write 8 bytes at a time
+            # so write to a tmpio first
+            no_missing_bit_vec =  BitArray(skipmissing(colvals))
+            bytes_needed = ceil(Int, length(no_missing_bit_vec) / sizeof(UInt8))
+            tmpio = IOBuffer()
+            write(tmpio, no_missing_bit_vec)
+            seek(tmpio, 0)
+            packed_bits = read(tmpio, bytes_needed)
+            write(data_to_compress_io, packed_bits)
+        else
+            for val in skipmissing(colvals)
+                write(data_to_compress_io, val)
+            end
+        end
 
         data_to_compress::Vector{UInt8} = take!(data_to_compress_io)
 
@@ -112,17 +174,17 @@ function write_col_chunk(fileio, colvals, encoding = 0, codec = COMPRESSION_CODE
         uncompressed_page_size = length(data_to_compress)
         compressed_page_size = length(compressed_data)
 
-        set_field!(data_page_header, :_type, PAGE_TYPE["DATA_PAGE"])
-        set_field!(data_page_header, :uncompressed_page_size, uncompressed_page_size)
-        set_field!(data_page_header, :compressed_page_size, compressed_page_size)
+        Thrift.set_field!(data_page_header, :_type, PAGE_TYPE["DATA_PAGE"])
+        Thrift.set_field!(data_page_header, :uncompressed_page_size, uncompressed_page_size)
+        Thrift.set_field!(data_page_header, :compressed_page_size, compressed_page_size)
         # TODO proper CRC
-        set_field!(data_page_header, :crc , 0)
+        Thrift.set_field!(data_page_header, :crc , 0)
 
-        set_field!(data_page_header, :data_page_header, PAR2.DataPageHeader())
-        set_field!(data_page_header.data_page_header, :num_values , Int32(length(colvals)))
-        set_field!(data_page_header.data_page_header, :encoding , encoding) # encoding 0 is plain encoding
-        set_field!(data_page_header.data_page_header, :definition_level_encoding, 3)
-        set_field!(data_page_header.data_page_header, :repetition_level_encoding, 3)
+        Thrift.set_field!(data_page_header, :data_page_header, PAR2.DataPageHeader())
+        Thrift.set_field!(data_page_header.data_page_header, :num_values , Int32(length(colvals)))
+        Thrift.set_field!(data_page_header.data_page_header, :encoding , encoding) # encoding 0 is plain encoding
+        Thrift.set_field!(data_page_header.data_page_header, :definition_level_encoding, 3)
+        Thrift.set_field!(data_page_header.data_page_header, :repetition_level_encoding, 3)
 
         position_before_page_header_write = position(fileio)
         write_thrift(fileio, data_page_header)
@@ -183,7 +245,7 @@ function write_col_chunk(fileio, colvals, encoding = 0, codec = COMPRESSION_CODE
                 # this must mean
                 # bitwidth_mask > bitsz - bits_written
                 # if the remaining bits is not enough to write a packed number
-
+                42
             end
         end
     else
@@ -191,17 +253,21 @@ function write_col_chunk(fileio, colvals, encoding = 0, codec = COMPRESSION_CODE
     end
 end
 
-function write_col(fileio, colvals, colname)
-    dict_info = write_col_dict(fileio, colvals, COMPRESSION_CODEC_CODE["snappy"])
+
+function write_col(fileio, colvals::AbstractArray{T}, colname, encoding, codec) where T
+    if nonmissingtype(T) == Bool
+        # dictionary type are not supported for
+        dict_info = (offset = -1, uncompressed_size = 0, compressed_size = 0)
+    else
+        dict_info = write_col_dict(fileio, colvals, codec)
+    end
 
     # TODO determine a more appropriate chunk size
     num_chunks =  1
 
     # TODO choose an encoding
     # TODO put encoding into a dictionary
-    encoding = 0
-    codec = COMPRESSION_CODEC_CODE["snappy"]
-    chunk_info = [write_col_chunk(fileio, colvals, encoding, codec) for i in 1:num_chunks]
+    chunk_info = [write_col_chunk(fileio, colvals, codec, encoding) for i in 1:num_chunks]
 
     sizes = reduce(chunk_info; init = dict_info) do x, y
         (
@@ -219,33 +285,161 @@ function write_col(fileio, colvals, colname)
 
 end
 
-function create_schema_parent_node(ncol)
+function create_schema_parent_node(ncols)
     schmea_parent_node = PAR2.SchemaElement()
-    # set_field!(schmea_parent_node, :type_length, 0)
-    # set_field!(schmea_parent_node, :repetition_type, 0)
-    set_field!(schmea_parent_node, :name, "schema")
-    set_field!(schmea_parent_node, :num_children, ncol)
-    # set_field!(schmea_parent_node, :converted_type, 0)
-    # set_field!(schmea_parent_node, :scale, 0)
-    # set_field!(schmea_parent_node, :precision, 0)
-    # set_field!(schmea_parent_node, :field_id, 0)
-    #set_field!(schmea_parent_node, :logicalType, 0) # it's undef
+    Thrift.set_field!(schmea_parent_node, :name, "schema")
+    Thrift.set_field!(schmea_parent_node, :num_children, ncols)
     schmea_parent_node
 end
 
 function create_col_schema(type, colname)
     schema_node = PAR2.SchemaElement()
     # look up type code
-    set_field!(schema_node, :_type, COL_TYPE_CODE[type])
+    Thrift.set_field!(schema_node, :_type, COL_TYPE_CODE[type |> nonmissingtype])
+    Thrift.set_field!(schema_node, :repetition_type, 1)
+    Thrift.set_field!(schema_node, :name, colname)
+    Thrift.set_field!(schema_node, :num_children, 0)
 
-    # set_field!(schema_node, :type_length, 0)
-    set_field!(schema_node, :repetition_type, 1)
-    set_field!(schema_node, :name, colname)
-    set_field!(schema_node, :num_children, 0)
-    # set_field!(schema_node, :converted_type, 17)
-    # set_field!(schema_node, :scale, 0)
-    # set_field!(schema_node, :precision, 0)
-    # set_field!(schema_node, :field_id, 0)
-    #set_field!(schema_node, :logicalType, 0) # it's undef
     schema_node
+end
+
+
+function create_col_schema(type::Type{String}, colname)
+    """create col schema for string"""
+    schema_node = PAR2.SchemaElement()
+    # look up type code
+    Thrift.set_field!(schema_node, :_type, COL_TYPE_CODE[type])
+    Thrift.set_field!(schema_node, :repetition_type, 1)
+    Thrift.set_field!(schema_node, :name, colname)
+    Thrift.set_field!(schema_node, :num_children, 0)
+
+    # thing that are special for String
+    Thrift.set_field!(schema_node, :converted_type, CONVERTED_COL_TYPE_CODE_UTF8)
+
+    logicalType = PAR2.LogicalType()
+    Thrift.set_field!(logicalType, :STRING, PAR2.StringType())
+
+    Thrift.set_field!(schema_node, :logicalType, logicalType)
+
+    schema_node
+end
+
+
+function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = PLAIN_ENCODING)
+    codec = COMPRESSION_CODEC_CODE[uppercase(compression_codec)]
+
+    # tbl needs to be iterable by column as parquet is a columnar format
+    @assert Tables.columnaccess(tbl)
+
+    fileio = open(path, "w")
+    write(fileio, "PAR1")
+
+    colnames::Vector{Symbol} = Tables.columnnames(tbl)
+    ncols = length(colnames)
+    nrows = length(Tables.rows(tbl))
+
+    # the + 1 comes from the fact that schema is tree and there is an extra
+    # parent node
+    schemas = Vector{PAR2.SchemaElement}(undef, ncols + 1)
+    schemas[1] = create_schema_parent_node(ncols)
+    col_chunk_metas = Vector{PAR2.ColumnChunk}(undef, ncols)
+    row_group_file_offset = -1
+
+    @showprogress for (coli, colname_sym) in enumerate(colnames)
+        colvals = Tables.getcolumn(tbl, colname_sym)
+        colname = String(colname_sym)
+
+        # write the data
+        col_info = write_col(fileio, colvals, colname, encoding, codec)
+
+        # the `row_group_file_offset` keeps track where the data
+        # starts, so keep it at the dictonary of the first data
+        if coli == 1
+            if col_info.dictionary_page_offset == -1
+                row_group_file_offset = col_info.data_page_offset
+            else
+                row_group_file_offset = col_info.dictionary_page_offset
+            end
+        end
+
+        # write the column metadata
+        # can probably write the metadata right after the data chunks
+        col_meta = PAR2.ColumnMetaData()
+
+        Thrift.set_field!(col_meta, :_type, COL_TYPE_CODE[eltype(colvals) |> nonmissingtype])
+        # these are all the fields
+        # TODO collect all the encodings used
+        if eltype(colvals) == Bool
+            Thrift.set_field!(col_meta, :encodings, Int32[0, 3])
+        else
+            Thrift.set_field!(col_meta, :encodings, Int32[2, 0, 3])
+        end
+        Thrift.set_field!(col_meta, :path_in_schema, [colname])
+        Thrift.set_field!(col_meta, :codec, codec)
+        Thrift.set_field!(col_meta, :num_values, length(colvals))
+
+        Thrift.set_field!(col_meta, :total_uncompressed_size, col_info.uncompressed_size)
+        Thrift.set_field!(col_meta, :total_compressed_size, col_info.compressed_size)
+
+        Thrift.set_field!(col_meta, :data_page_offset, col_info.data_page_offset)
+        if col_info.dictionary_page_offset != -1
+            Thrift.set_field!(col_meta, :dictionary_page_offset, col_info.dictionary_page_offset)
+        end
+
+        # write the column meta data right after the data
+        # keep track of the position so it can put into the column chunk
+        # metadata
+        col_meta_offset = position(fileio)
+        write_thrift(fileio, col_meta)
+
+        # Prep metadata for the filemetadata
+        ## column chunk metadata
+        col_chunk_meta = PAR2.ColumnChunk()
+
+        Thrift.set_field!(col_chunk_meta, :file_offset, col_meta_offset)
+        Thrift.set_field!(col_chunk_meta, :meta_data, col_meta)
+        Thrift.clear(col_chunk_meta, :offset_index_offset)
+        Thrift.clear(col_chunk_meta, :offset_index_length)
+        Thrift.clear(col_chunk_meta, :column_index_offset)
+        Thrift.clear(col_chunk_meta, :column_index_length)
+
+        col_chunk_metas[coli] = col_chunk_meta
+
+        # add the schema
+        schemas[coli + 1] = create_col_schema(eltype(colvals) |> nonmissingtype, colname)
+    end
+
+    # now all the data is written we write the filemetadata
+    # finalise it by writing the filemetadata
+    filemetadata = PAR2.FileMetaData()
+    Thrift.set_field!(filemetadata, :version, 1)
+    Thrift.set_field!(filemetadata, :schema, schemas)
+    Thrift.set_field!(filemetadata, :num_rows, nrows)
+    Thrift.set_field!(filemetadata, :created_by, "Diban.jl")
+
+    # create row_groups
+    # TODO do multiple row_groups
+    row_group = PAR2.RowGroup()
+
+    Thrift.set_field!(row_group, :columns, col_chunk_metas)
+    Thrift.set_field!(row_group, :total_byte_size, Int64(sum(x->x.meta_data.total_compressed_size, col_chunk_metas)))
+    Thrift.set_field!(row_group, :num_rows, nrows)
+    if row_group_file_offset == -1
+        error("row_group_file_offset is not set")
+    else
+        Thrift.set_field!(row_group, :file_offset, row_group_file_offset)
+    end
+    Thrift.set_field!(row_group, :total_compressed_size, Int64(sum(x->x.meta_data.total_compressed_size, col_chunk_metas)))
+
+    Thrift.set_field!(filemetadata, :row_groups, [row_group])
+
+    position_before_filemetadata_write = position(fileio)
+
+    write_thrift(fileio, filemetadata)
+
+    filemetadata_size = position(fileio) - position_before_filemetadata_write
+
+    write(fileio, Int32(filemetadata_size))
+    write(fileio, "PAR1")
+    close(fileio)
 end

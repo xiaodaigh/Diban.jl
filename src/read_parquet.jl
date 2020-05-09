@@ -1,7 +1,6 @@
 using Base.Threads: @spawn
 using Base.Iterators: drop
-#using ProgressMeter: @showprogress
-using Parquet: ParFile, ncols
+using ProgressMeter: @showprogress
 using NamedTupleTools: namedtuple
 
 read_parquet(path, cols::Vector{Symbol}; kwargs...) = read_parquet(path, String.(cols); kwargs...)
@@ -32,7 +31,7 @@ function read_parquet(path, cols::Vector{String}; multithreaded=true, verbose = 
 	filemetadata = metadata(path)
 
 	if multithreaded
-		for (i, j) in enumerate(colnums)
+		@showprogress for (i, j) in enumerate(colnums)
 			put!(c1, true)
 			results[i] = @spawn begin
 				res = read_column(path, filemetadata, j)
@@ -41,7 +40,7 @@ function read_parquet(path, cols::Vector{String}; multithreaded=true, verbose = 
 			end
 		end
 	else
-		for (i, j) in enumerate(colnums)
+		@showprogress for (i, j) in enumerate(colnums)
 			results[i] = read_column(path, filemetadata, j)
 		end
 	end

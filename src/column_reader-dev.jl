@@ -9,8 +9,7 @@
 
 using Diban
 using Diban: TYPES, read_column
-using Parquet
-using Parquet: SZ_PAR_MAGIC, SZ_FOOTER, PAR2, read_thrift
+
 
 path = "c:/scratch/test.parquet"
 
@@ -41,7 +40,7 @@ metadata.row_groups[1].columns[1].meta_data.dictionary_page_offset
 seek(fileio, metadata.row_groups[1].columns[1].meta_data.dictionary_page_offset)
 
 
-ph = Parquet.read_thrift(fileio, PAR2.PageHeader)
+ph = read_thrift(fileio, PAR2.PageHeader)
 
 
 
@@ -60,7 +59,7 @@ uncompressed_data = Snappy.uncompress(compressed_data)
 
 reinterpret(Int64, uncompressed_data)
 
-ph2 = Parquet.read_thrift(fileio, PAR2.PageHeader)
+ph2 = read_thrift(fileio, PAR2.PageHeader)
 
 
 
@@ -90,8 +89,8 @@ encoded_data_length = Int(read(io, UInt32))
 # the next set of data is a LEB128 unsigned int coded by that
 # althought it is possible for the number be larger 2^31-1, in practice it is
 # not encouraged, and hence not supported by this algorithm
-using Parquet: _read_varint;
-header = Parquet._read_varint(io, UInt32)
+
+header = _read_varint(io, UInt32)
 # if the last binary digit is 1 then the next bits are binary encoded
 # otherwise it's rle encoded
 
@@ -116,7 +115,7 @@ dataio = IOBuffer(encoded_data)
 
 bitwidth = read(dataio, UInt8)
 
-header = Parquet._read_varint(dataio, UInt32)
+header = _read_varint(dataio, UInt32)
 
 string(0x10, base=2, pad=8)
 string(0x32, base=2, pad=8)

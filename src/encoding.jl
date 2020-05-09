@@ -1,5 +1,4 @@
 # obtain the encoding of the page
-using Parquet: Page
 using Thrift: isfilled
 
 function page_encoding(page::Page)

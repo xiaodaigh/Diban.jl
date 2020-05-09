@@ -1,4 +1,4 @@
-using Parquet, Diban
+using Diban
 
 path = "tmp.parquet"
 #v1 = read_column(path, 1)
@@ -13,7 +13,7 @@ res = Vector{Union{Missing, T}}(missing, nrows(par))
 write_cursor = 1
 #for row_group in filemetadata.row_groups
 row_group =  filemetadata.row_groups[1]
-pgs = Parquet.pages(par, row_group.columns[col_num])
+pgs = pages(par, row_group.columns[col_num])
 # the first page is always the dictionary page
 dictionary_page = pgs[1]
 
@@ -22,17 +22,17 @@ dictionary_of_values = T.(values(par, dictionary_page)[1])
 
 data_page = pgs[2]
 
-@which Parquet.values(par, data_page)
+@which values(par, data_page)
 
 
-#@time vals, repetition, decode = Parquet.values(par, data_page)
+#@time vals, repetition, decode = values(par, data_page)
 
 
 
 ################################################################################
 # begin: expansion of functions `values`
 ################################################################################
-using Parquet: coltype, page_encodings, page_num_values, read_levels_and_values, isrequired, max_definition_level, read_levels, read_values
+
 page = data_page
 ctype = coltype(page.colchunk)
 rawbytes = bytes(page)
@@ -41,7 +41,6 @@ encs = page_encodings(page)
 num_values = page_num_values(page)
 typ = page.hdr._type
 
-using Parquet: PageType
 
 (typ == PageType.DATA_PAGE) || (typ == PageType.DATA_PAGE_V2)
 
@@ -53,7 +52,7 @@ vals, repetition, dd = read_levels_and_values(io, encs, ctype, num_values, par, 
 	################################################################################
 	# begin: expansion of functions `read_levels_and_values`
 	################################################################################
-cname = Parquet.colname(page.colchunk)
+cname = colname(page.colchunk)
 enc, defn_enc, rep_enc = encs
 
 position(io)
@@ -72,7 +71,7 @@ defn_levels = isrequired(par.schema, cname) ? Int[] : read_levels(io, max_defini
 
 num_values
 bw = 1
-using Parquet: read_hybrid
+
 @which read_hybrid(io, num_values, bw)
 
 read_hybrid(io, num_values, bw)
@@ -96,7 +95,7 @@ nmissing = sum(==(0), defn_levels)
 		# begin: expansion of functions `read_values`
 		################################################################################
 @which read_values(io, enc, ctype, num_values - nmissing)
-using Parquet: Encoding, read_rle_dict, read_hybrid
+
 enc == Encoding.PLAIN
 enc == Encoding.PLAIN_DICTIONARY || enc == Encoding.RLE_DICTIONARY
 
@@ -132,11 +131,11 @@ len = read_len ? read_fixed(io, Int32) : Int32(0)
 @debug("reading hybrid data", len, num_values, bits)
 arrpos = 1
 #while arrpos <= num_values
-using Parquet: _read_varint, read_rle_run, bit2bytewidth, byt2itype
+
 byt = bit2bytewidth(bits)
 typ = byt2itype(byt)
 @which _read_varint(io, Int)
-Int(Parquet.MSB)
+Int(MSB)
 
 read(io, UInt8)
 read(io, UInt8)
@@ -149,7 +148,7 @@ Int(0x7f)
 
 res = Int(0x02)
 
-0x00 & Parquet.MSB
+0x00 & MSB
 
 runhdr = _read_varint(io, Int)
 isbitpack = ((runhdr & 0x1) == 0x1)
@@ -242,30 +241,30 @@ arr
 
 
 cname = "Cl.thickness"
-@which Parquet.max_definition_level(par.schema, cname)
-@which Parquet.max_definition_level(par.schema, cname)
+@which max_definition_level(par.schema, cname)
+@which max_definition_level(par.schema, cname)
 
 parentname("Cl.thickness")
 
-@which Parquet.isrequired(par.schema, "Cl.thickness")
+@which isrequired(par.schema, "Cl.thickness")
 
 schname = "Cl.thickness"
-schelem = Parquet.elem(par.schema, schname)
+schelem = elem(par.schema, schname)
 
 using Thrift
 Thrift.isfilled(schelem, :repetition_type)
 
-@which Parquet.parentname(schname)
+@which parentname(schname)
 
 join(parentname(), '.')
 
-Parquet.parentname(split(schname, '.'))
+parentname(split(schname, '.'))
 
 (schelem.repetition_type == PAR2.FieldRepetitionType.REQUIRED)
 
 # everything after the first data datapages
 for data_page in Base.Iterators.drop(pages, 1)
-	values, repetition, decode = Parquet.values(par, data_page)
+	values, repetition, decode = values(par, data_page)
 	l = sum(repetition)
 
 	# if all repetition values are 1 then it's not used
@@ -276,7 +275,7 @@ for data_page in Base.Iterators.drop(pages, 1)
 	# * plained-encoded in which case just return the values
 	page_encoding = Diban.page_encoding(data_page)
 
-	if page_encoding == Parquet.Encoding.PLAIN_DICTIONARY
+	if page_encoding == Encoding.PLAIN_DICTIONARY
 		if repetition_not_used
 			res[write_cursor:write_cursor+l-1] .= dictionary_of_values[values.+1]
 		else
@@ -286,7 +285,7 @@ for data_page in Base.Iterators.drop(pages, 1)
 				end
 			end
 		end
-	elseif page_encoding == Parquet.Encoding.PLAIN
+	elseif page_encoding == Encoding.PLAIN
 		if repetition_not_used
 			res[write_cursor:write_cursor+l-1] .= values
 		else

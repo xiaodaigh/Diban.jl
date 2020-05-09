@@ -55,3 +55,4 @@ src/cpp/test-include-julia/CMakeCache.txt
 src/cpp/test-include-julia/Makefile
 test-cpp-wrap/CMakeLists.txt
 test-cpp-wrap/CMakeLists.txt
+*.parquet
