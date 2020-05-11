@@ -20,8 +20,7 @@ You need a particular branch of Parquet.jl and the master branch of Diban.jl
 ## Usage
 
 ### Write
-Diban supports `Int32, Int64, Float32, Float64, Bool, String` vectors, `missing`
-values are supported.
+Diban supports `Int32, Int64, Float32, Float64, Bool`(including `BitArray`), and `String` vectors, and their `Union` with `Missing`.
 
 ```julia
 using Diban
