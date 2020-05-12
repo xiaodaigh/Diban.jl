@@ -7,6 +7,8 @@ using CodecZlib: GzipCompressor
 #using CodecLz4: LZ4HCCompressor
 using LittleEndianBase128
 using LittleEndianBase128: encode
+using Base.Iterators: partition
+using CategoricalArrays: CategoricalArray, CategoricalValue
 
 function write_thrift(fileio, thrift_obj)
     p = TCompactProtocol(TFileTransport(fileio))
@@ -54,6 +56,14 @@ end
 function write_col_dict(fileio, colvals::AbstractArray{T}, codec) where T
     """ write the column dictionary chunk """
     uvals = DataAPI.levels(colvals) # this does not include missing
+
+    if length(uvals) > 127
+        # do not support dictionary with more than 127 levels
+        # TODO relax this 127 restriction
+        @warn "More than 127 levels in dictionary. This is not supported at this stage."
+        return (offset = -1, uncompressed_size = 0, compressed_size = 0)
+    end
+
     if nonmissingtype(T) == String
         # the raw bytes of made of on UInt32 to indicate string length
         # and the content of the string
@@ -82,7 +92,6 @@ function write_col_dict(fileio, colvals::AbstractArray{T}, codec) where T
     Thrift.set_field!(dict_page_header.dictionary_page_header, :encoding , Int32(2)) # value 2 is plain encoding for dictionary pages
     Thrift.set_field!(dict_page_header.dictionary_page_header, :is_sorted , false)
 
-
     before_write_page_header_pos = position(fileio)
 
     write_thrift(fileio, dict_page_header)
@@ -98,23 +107,25 @@ end
 # TODO set the encoding code into a dictionary
 function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) where T
     if encoding == PAR2.Encoding.PLAIN
-        """Plain encoding"""
         # generate the data page header
         data_page_header = PAR2.PageHeader()
 
         # write repetition level data
         # do nothing
+        # this seems to be related to nested columns
+        # and hence is not needed here
 
+        # set up a buffer to write to
         data_to_compress_io = IOBuffer()
 
         if Missing <: T
             # if there is missing
             # use the bit packing algorithm to write the
             # definition_levels
-            bytes_needed = ceil(Int, length(colvals)/sizeof(UInt8))
+
+            bytes_needed = ceil(Int, length(colvals) / 8sizeof(UInt8))
             tmp = UInt32((UInt32(bytes_needed) << 1) | 1)
             bitpacking_header = LittleEndianBase128.encode(tmp)
-
 
             tmpio = IOBuffer()
             not_missing_bits::BitArray = .!ismissing.(colvals)
@@ -155,7 +166,7 @@ function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) whe
             # write a bitarray seems to write 8 bytes at a time
             # so write to a tmpio first
             no_missing_bit_vec =  BitArray(skipmissing(colvals))
-            bytes_needed = ceil(Int, length(no_missing_bit_vec) / sizeof(UInt8))
+            bytes_needed = ceil(Int, length(no_missing_bit_vec) / 8sizeof(UInt8))
             tmpio = IOBuffer()
             write(tmpio, no_missing_bit_vec)
             seek(tmpio, 0)
@@ -177,6 +188,7 @@ function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) whe
         Thrift.set_field!(data_page_header, :_type, PAGE_TYPE["DATA_PAGE"])
         Thrift.set_field!(data_page_header, :uncompressed_page_size, uncompressed_page_size)
         Thrift.set_field!(data_page_header, :compressed_page_size, compressed_page_size)
+
         # TODO proper CRC
         Thrift.set_field!(data_page_header, :crc , 0)
 
@@ -253,21 +265,29 @@ function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) whe
     end
 end
 
+write_col(fileio, colvals::CategoricalArray, args...; kwars...) = begin
+    throw("Currently CategoricalArrays are not supported.")
+end
 
-function write_col(fileio, colvals::AbstractArray{T}, colname, encoding, codec) where T
-    if nonmissingtype(T) == Bool
-        # dictionary type are not supported for
-        dict_info = (offset = -1, uncompressed_size = 0, compressed_size = 0)
+function write_col(fileio, colvals::AbstractArray{T}, colname, encoding, codec; num_chunks = 1) where T
+
+    # TODO turn writing dictionary back on
+    if false
+        if nonmissingtype(T) == Bool
+            # dictionary type are not supported for
+            dict_info = (offset = -1, uncompressed_size = 0, compressed_size = 0)
+        else
+            dict_info = write_col_dict(fileio, colvals, codec)
+        end
     else
-        dict_info = write_col_dict(fileio, colvals, codec)
+        dict_info = (offset = -1, uncompressed_size = 0, compressed_size = 0)
     end
 
-    # TODO determine a more appropriate chunk size
-    num_chunks =  1
+    num_vals_per_chunk = ceil(Int, length(colvals) / num_chunks)
 
     # TODO choose an encoding
     # TODO put encoding into a dictionary
-    chunk_info = [write_col_chunk(fileio, colvals, codec, encoding) for i in 1:num_chunks]
+    chunk_info = [write_col_chunk(fileio, val_chunk, codec, encoding) for val_chunk in partition(colvals, num_vals_per_chunk)]
 
     sizes = reduce(chunk_info; init = dict_info) do x, y
         (
@@ -326,10 +346,26 @@ end
 
 
 function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = PLAIN_ENCODING)
-    codec = COMPRESSION_CODEC_CODE[uppercase(compression_codec)]
-
     # tbl needs to be iterable by column as parquet is a columnar format
     @assert Tables.columnaccess(tbl)
+
+    # check that all types are supported
+    sch = Tables.schema(tbl)
+    err_msgs = String[]
+    for type in sch.types
+        if type <: CategoricalValue
+            push!(err_msgs, "CategoricalArrays are not supported at this stage. \n")
+        elseif !(nonmissingtype(type) <: Union{Int32, Int64, Float32, Float64, Bool, String})
+            push!(err_msgs, "Column whose `eltype` is $type is not supported at this stage. \n")
+        end
+    end
+
+    err_msgs = unique(err_msgs)
+    if length(err_msgs) > 0
+        throw(reduce(*, err_msgs))
+    end
+
+    codec = COMPRESSION_CODEC_CODE[uppercase(compression_codec)]
 
     fileio = open(path, "w")
     write(fileio, "PAR1")
@@ -345,12 +381,26 @@ function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = PLAIN
     col_chunk_metas = Vector{PAR2.ColumnChunk}(undef, ncols)
     row_group_file_offset = -1
 
+    # figure out the right number of chunks
+    # TODO test that it works for all supported table
+    table_size_bytes = Base.summarysize(tbl)
+
+    approx_raw_to_parquet_compression_ratio = 6
+    approx_post_compression_size = (table_size_bytes / 2^30) / approx_raw_to_parquet_compression_ratio
+
+    # if size is larger than 64mb and has more than 6 rows
+    if (approx_post_compression_size > 0.064) & (nrows > 6)
+        recommended_chunks = ceil(Int, approx_post_compression_size / 6) * 6
+    else
+        recommended_chunks = 1
+    end
+
     @showprogress for (coli, colname_sym) in enumerate(colnames)
         colvals = Tables.getcolumn(tbl, colname_sym)
         colname = String(colname_sym)
 
         # write the data
-        col_info = write_col(fileio, colvals, colname, encoding, codec)
+        col_info = write_col(fileio, colvals, colname, encoding, codec; num_chunks = recommended_chunks)
 
         # the `row_group_file_offset` keeps track where the data
         # starts, so keep it at the dictonary of the first data
