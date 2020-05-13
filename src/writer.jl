@@ -10,24 +10,36 @@ using LittleEndianBase128: encode
 using Base.Iterators: partition
 using CategoricalArrays: CategoricalArray, CategoricalValue
 
+# a mapping of Julia types to _Type codes in Parquet format
+const COL_TYPE_CODE = Dict{DataType, Int32}(
+    Bool => PAR2._Type.BOOLEAN,
+    Int32 => PAR2._Type.INT32,
+    Int64 => PAR2._Type.INT64,
+    #INT96 => 3,  // deprecated, only used by legacy implementations. # not supported
+    Float32 => PAR2._Type.FLOAT,
+    Float64 => PAR2._Type.DOUBLE,
+    String => PAR2._Type.BYTE_ARRAY, # BYTE_ARRAY
+    # FIXED_LEN_BYTE_ARRAY => 7,
+    )
+
 function write_thrift(fileio, thrift_obj)
     p = TCompactProtocol(TFileTransport(fileio))
     Thrift.write(p, thrift_obj)
 end
 
-function compress_using_codec(colvals::AbstractArray, codec::Int)::Vector{UInt8}
+function compress_using_codec(colvals::AbstractArray, codec::Integer)::Vector{UInt8}
     uncompressed_byte_data = reinterpret(UInt8, colvals) |> collect
 
-    if codec == COMPRESSION_CODEC_CODE["UNCOMPRESSED"]
+    if codec == PAR2.CompressionCodec.UNCOMPRESSED
         return uncompressed_byte_data
-    elseif codec == COMPRESSION_CODEC_CODE["SNAPPY"]
+    elseif codec == PAR2.CompressionCodec.SNAPPY
         compressed_data = Snappy.compress(uncompressed_byte_data)
-    elseif codec == COMPRESSION_CODEC_CODE["GZIP"]
+    elseif codec == PAR2.CompressionCodec.GZIP
         compressed_data = transcode(GzipCompressor, uncompressed_byte_data)
-    elseif codec == COMPRESSION_CODEC_CODE["LZ4"]
+    elseif codec == PAR2.CompressionCodec.LZ4
         error("lz4 is not supported as data compressed with https://github.com/JuliaIO/CodecLz4.jl can't seem to be read by R or Python. If you know how to fix it please help out.")
         #compressed_data = transcode(LZ4HCCompressor, uncompressed_byte_data)
-    elseif codec == COMPRESSION_CODEC_CODE["ZSTD"]
+    elseif codec == PAR2.CompressionCodec.ZSTD
         compressed_data = transcode(ZstdCompressor, uncompressed_byte_data)
     else
         error("not yet implemented")
@@ -185,7 +197,7 @@ function write_col_chunk(fileio, colvals::AbstractArray{T}, codec, encoding) whe
         uncompressed_page_size = length(data_to_compress)
         compressed_page_size = length(compressed_data)
 
-        Thrift.set_field!(data_page_header, :_type, PAGE_TYPE["DATA_PAGE"])
+        Thrift.set_field!(data_page_header, :_type, PAR2.PageType.DATA_PAGE)
         Thrift.set_field!(data_page_header, :uncompressed_page_size, uncompressed_page_size)
         Thrift.set_field!(data_page_header, :compressed_page_size, compressed_page_size)
 
@@ -333,8 +345,8 @@ function create_col_schema(type::Type{String}, colname)
     Thrift.set_field!(schema_node, :name, colname)
     Thrift.set_field!(schema_node, :num_children, 0)
 
-    # thing that are special for String
-    Thrift.set_field!(schema_node, :converted_type, CONVERTED_COL_TYPE_CODE_UTF8)
+    # for string set converted type to UTF8
+    Thrift.set_field!(schema_node, :converted_type, PAR2.ConvertedType.UTF8)
 
     logicalType = PAR2.LogicalType()
     Thrift.set_field!(logicalType, :STRING, PAR2.StringType())
@@ -345,7 +357,7 @@ function create_col_schema(type::Type{String}, colname)
 end
 
 
-function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = PLAIN_ENCODING)
+function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = Encoding.PLAIN)
     # tbl needs to be iterable by column as parquet is a columnar format
     @assert Tables.columnaccess(tbl)
 
@@ -365,7 +377,8 @@ function write_parquet(path, tbl; compression_codec = "SNAPPY", encoding = PLAIN
         throw(reduce(*, err_msgs))
     end
 
-    codec = COMPRESSION_CODEC_CODE[uppercase(compression_codec)]
+    # convert a string or symbol compression codec into the numeric code
+    codec = getproperty(PAR2.CompressionCodec, Symbol(uppercase(string(compression_codec))))
 
     fileio = open(path, "w")
     write(fileio, "PAR1")
