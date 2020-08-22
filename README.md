@@ -1,4 +1,6 @@
-# Diban.jl (Dìbǎn 地板)
+# Please use Parquet.jl instead. This is a purely development library. All algorithms will be contributed back to Parquet.jl
+
+## Diban.jl (Dìbǎn 地板)
 
 There is a `write_paruqet` and `read_parquet` functions to write and read
 parquet files! It's EXTREMELY slow at the moment but it works on newer Parquet
